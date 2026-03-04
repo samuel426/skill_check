@@ -63,6 +63,7 @@ public class Problem1 {
         String line;
 
         // 여기에 코드를 작성하세요.
+        Map<String, Map<String, Integer>> students = new HashMap<>();
         // 데이터 저장 구조 선언
 
 
@@ -70,6 +71,7 @@ public class Problem1 {
             line = line.trim();
             if (line.startsWith("ADD")) {
                 // TODO: ADD 명령어 처리
+            	
 
             } else if (line.startsWith("DELETE")) {
                 // TODO: DELETE 명령어 처리
