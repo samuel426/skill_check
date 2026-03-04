@@ -90,33 +90,55 @@ public class Problem3 {
         List<Employee> employees = new ArrayList<>();
 
         for (int i = 0; i < N; i++) {
-            // 여기에 코드를 작성하세요.
-            // TODO: 사원 정보 파싱 후 employees에 추가
-
+            StringTokenizer st = new StringTokenizer(br.readLine());
+            String name = st.nextToken();
+            String dept = st.nextToken();
+            int year    = Integer.parseInt(st.nextToken());
+            int score   = Integer.parseInt(st.nextToken());
+            employees.add(new Employee(name, dept, year, score));
         }
 
-        String condition = br.readLine().trim();
+        // condition 파싱: "SELECT <부서|ALL> TOP <K>"
+        StringTokenizer st = new StringTokenizer(br.readLine());
+        st.nextToken(); // "SELECT" 버림
+        String deptFilter = st.nextToken(); // "ALL" 또는 부서명
+        st.nextToken(); // "TOP" 버림
+        int K = Integer.parseInt(st.nextToken());
 
-        // 여기에 코드를 작성하세요.
-        // TODO: condition 파싱 (부서, K 추출)
+        // 필터링
+        List<Employee> filtered = new ArrayList<>();
+        for (Employee e : employees) {
+            if ("ALL".equals(deptFilter) || deptFilter.equals(e.dept)) {
+                filtered.add(e);
+            }
+        }
 
+        // 정렬
+        filtered.sort(getComparator());
 
-        // TODO: 필터링 (ALL이면 전체, 부서명이면 해당 부서만)
-
-
-        // TODO: 정렬 (Comparator 적용)
-
-
-        // TODO: 상위 K명 출력
-
+        // 상위 K명 출력
+        int limit = Math.min(K, filtered.size());
+        for (int i = 0; i < limit; i++) {
+            Employee e = filtered.get(i);
+            sb.append(i + 1).append(". ")
+              .append(e.name).append(" (")
+              .append(e.dept).append(", ")
+              .append(e.year).append("년차, ")
+              .append(e.score).append("점)\n");
+        }
 
         System.out.print(sb);
     }
 
     // ※ 채점을 위해 아래 메서드 시그니처를 수정하지 마세요.
     static Comparator<Employee> getComparator() {
-        // 여기에 코드를 작성하세요.
-        // 1순위: 점수 내림차순, 2순위: 연차 내림차순, 3순위: 이름 오름차순
-        return null;
+        // 1순위: 점수 내림차순
+        // 2순위: 연차 내림차순
+        // 3순위: 이름 오름차순
+        return (a, b) -> {
+            if (a.score != b.score) return b.score - a.score;
+            if (a.year  != b.year)  return b.year  - a.year;
+            return a.name.compareTo(b.name);
+        };
     }
 }

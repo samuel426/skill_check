@@ -136,30 +136,36 @@ public class WebSocketServer {
 
     /** 같은 empNo의 모든 세션에 PUSH 전송 */
     void emitToEmployee(String empNo, String json) {
-        // 여기에 코드를 작성하세요.
-        // empToSessions에서 empNo의 세션 목록을 꺼내 각각 emit() 호출
-        // 해당 empNo가 현재 미접속 상태면 그냥 무시 (알림 객체는 저장됨)
+        List<String> sessions = empToSessions.get(empNo);
+        if (sessions == null) return;
+        for (String sid : sessions) {
+            emit(sid, json);
+        }
     }
 
     // =========================================================
 
     /** 세션 연결 이벤트 */
     void onOpen(String sessionId) {
-        // 여기에 코드를 작성하세요.
         sessionToEmp.put(sessionId, null);
     }
 
     /** 세션 종료 이벤트 */
     void onClose(String sessionId) {
-        // 여기에 코드를 작성하세요.
-        // 1. sessionToEmp에서 empNo 꺼내기
-        // 2. empToSessions에서 해당 세션 제거
-        // 3. sessionToEmp에서 sessionId 제거
+        String empNo = sessionToEmp.get(sessionId);
+        if (empNo != null) {
+            List<String> sessions = empToSessions.get(empNo);
+            if (sessions != null) {
+                sessions.remove(sessionId);
+                if (sessions.isEmpty()) empToSessions.remove(empNo);
+            }
+        }
+        sessionToEmp.remove(sessionId);
     }
 
     /** 메시지 수신 이벤트 — 여기가 핵심 구현 영역 */
     void onMessage(String sessionId, String json) {
-        String type = JsonParser.getStr(json, "type");
+        String type      = JsonParser.getStr(json, "type");
         String requestId = JsonParser.getStr(json, "requestId");
 
         if ("AUTH".equals(type)) {
@@ -182,15 +188,15 @@ public class WebSocketServer {
         // 여기에 코드를 작성하세요.
         // type에 따라 각 핸들러 메서드 호출
         switch (type) {
-            case "DOC_CREATE":  handleDocCreate(sessionId, json, requestId, empNo); break;
-            case "DOC_READ":    handleDocRead(sessionId, json, requestId, empNo);   break;
-            case "DOC_UPDATE":  handleDocUpdate(sessionId, json, requestId, empNo); break;
-            case "DOC_DELETE":  handleDocDelete(sessionId, json, requestId, empNo); break;
-            case "DOC_SUBMIT":  handleDocSubmit(sessionId, json, requestId, empNo); break;
+            case "DOC_CREATE":  handleDocCreate(sessionId, json, requestId, empNo);  break;
+            case "DOC_READ":    handleDocRead(sessionId, json, requestId, empNo);    break;
+            case "DOC_UPDATE":  handleDocUpdate(sessionId, json, requestId, empNo);  break;
+            case "DOC_DELETE":  handleDocDelete(sessionId, json, requestId, empNo);  break;
+            case "DOC_SUBMIT":  handleDocSubmit(sessionId, json, requestId, empNo);  break;
             case "DOC_APPROVE": handleDocApprove(sessionId, json, requestId, empNo); break;
-            case "DOC_REJECT":  handleDocReject(sessionId, json, requestId, empNo); break;
-            case "NOTI_LIST":   handleNotiList(sessionId, json, requestId, empNo);  break;
-            case "NOTI_READ":   handleNotiRead(sessionId, json, requestId, empNo);  break;
+            case "DOC_REJECT":  handleDocReject(sessionId, json, requestId, empNo);  break;
+            case "NOTI_LIST":   handleNotiList(sessionId, json, requestId, empNo);   break;
+            case "NOTI_READ":   handleNotiRead(sessionId, json, requestId, empNo);   break;
             case "NOTI_DELETE": handleNotiDelete(sessionId, json, requestId, empNo); break;
             default:
                 emit(sessionId, JsonParser.build(
@@ -200,110 +206,289 @@ public class WebSocketServer {
     }
 
     // =========================================================
-    // 핸들러 메서드 (각 TODO 구현)
-    // ※ 채점을 위해 아래 메서드 시그니처를 수정하지 마세요.
+    // 핸들러 메서드
     // =========================================================
 
     void handleAuth(String sessionId, String json, String requestId) {
-        // 여기에 코드를 작성하세요.
-        // 1. json에서 "employeeNumber" 파싱
-        // 2. sessionToEmp에 저장
-        // 3. empToSessions에 sessionId 추가 (없으면 새 리스트 생성)
-        // 4. OK 응답 emit
+        String empNo = JsonParser.getStr(json, "employeeNumber");
+        if (empNo == null || empNo.isEmpty()) {
+            emit(sessionId, JsonParser.build(
+                    "type","RESP","requestId",requestId,"status","ERR","code","BAD_REQUEST"
+            ));
+            return;
+        }
+        sessionToEmp.put(sessionId, empNo);
+        empToSessions.computeIfAbsent(empNo, k -> new ArrayList<>()).add(sessionId);
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK"));
     }
 
     void handleDocCreate(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. title, content, approvers 파싱 (title 1~50, approvers 1~5명 검증)
-        // 2. Document 생성 후 documents에 저장
-        // 3. {"type":"RESP","requestId":"...","status":"OK","docId":N,"ver":1} emit
+        String title      = JsonParser.getStr(json, "title");
+        String content    = JsonParser.getStr(json, "content");
+        String[] approvers = JsonParser.getStrArray(json, "approvers");
+
+        // 유효성 검사
+        if (title == null || title.isEmpty() || title.length() > 50
+                || approvers.length < 1 || approvers.length > 5) {
+            emit(sessionId, JsonParser.build(
+                    "type","RESP","requestId",requestId,"status","ERR","code","BAD_REQUEST"
+            ));
+            return;
+        }
+        if (content == null) content = "";
+
+        Document doc = new Document(nextDocId++, title, content, empNo, approvers, System.currentTimeMillis());
+        documents.put(doc.docId, doc);
+
+        emit(sessionId, JsonParser.build(
+                "type","RESP","requestId",requestId,"status","OK",
+                "docId", doc.docId,
+                "ver", doc.ver
+        ));
     }
 
     void handleDocRead(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. docId 파싱
-        // 2. documents에서 조회 → 없으면 NOT_FOUND
-        // 3. status == "DELETED" → NOT_FOUND
-        // 4. 권한 체크: authorEmpNo == empNo || approvers에 empNo 포함 → 아니면 FORBIDDEN
-        // 5. doc 전체 필드를 JSON으로 직렬화해서 emit
-        // 힌트: approvers 배열을 JSON 배열 문자열로 변환하는 헬퍼 만들기
+        int docId = JsonParser.getInt(json, "docId");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build(
+                    "type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND"
+            ));
+            return;
+        }
+        if (!doc.authorEmpNo.equals(empNo) && !isApprover(doc, empNo)) {
+            emit(sessionId, JsonParser.build(
+                    "type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN"
+            ));
+            return;
+        }
+
+        emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                + "\",\"status\":\"OK\",\"doc\":" + docToJson(doc) + "}");
     }
 
     void handleDocUpdate(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. docId, ver, title(선택), content(선택) 파싱
-        // 2. 문서 조회 → 없거나 DELETED → NOT_FOUND
-        // 3. 권한: authorEmpNo != empNo → FORBIDDEN
-        // 4. status != "DRAFT" → BAD_STATUS
-        // 5. ver != doc.ver → CONFLICT + curVer 반환
-        // 6. 필드 업데이트 + ver++ + updatedAt 갱신
-        // 7. OK + 새 ver 반환
+        int docId = JsonParser.getInt(json, "docId");
+        int ver   = JsonParser.getInt(json, "ver");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!doc.authorEmpNo.equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+        if (!"DRAFT".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","BAD_STATUS")); return;
+        }
+        if (ver != doc.ver) {
+            emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                    + "\",\"status\":\"ERR\",\"code\":\"CONFLICT\",\"curVer\":" + doc.ver + "}");
+            return;
+        }
+
+        String newTitle   = JsonParser.getStr(json, "title");
+        String newContent = JsonParser.getStr(json, "content");
+        if (newTitle   != null) doc.title   = newTitle;
+        if (newContent != null) doc.content = newContent;
+        doc.ver++;
+        doc.updatedAt = System.currentTimeMillis();
+
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK","ver",doc.ver));
     }
 
     void handleDocDelete(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // handleDocUpdate와 유사하지만 status를 "DELETED"로 변경 (soft delete)
+        int docId = JsonParser.getInt(json, "docId");
+        int ver   = JsonParser.getInt(json, "ver");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!doc.authorEmpNo.equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+        if (!"DRAFT".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","BAD_STATUS")); return;
+        }
+        if (ver != doc.ver) {
+            emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                    + "\",\"status\":\"ERR\",\"code\":\"CONFLICT\",\"curVer\":" + doc.ver + "}");
+            return;
+        }
+
+        doc.status = "DELETED";
+        doc.ver++;
+        doc.updatedAt = System.currentTimeMillis();
+
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK","ver",doc.ver));
     }
 
     void handleDocSubmit(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. docId, ver 파싱
-        // 2. 문서 조회 + 권한 + DRAFT 체크 + ver 체크
-        // 3. status = "IN_REVIEW", currentIdx = 0, ver++ 갱신
-        // 4. 작성자에게 OK RESP emit (statusAfter, currentIdx 포함)
-        // 5. createNotification() 호출 → 첫 결재자(approvers[0])에게 "DOC_SUBMITTED" PUSH
+        int docId = JsonParser.getInt(json, "docId");
+        int ver   = JsonParser.getInt(json, "ver");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!doc.authorEmpNo.equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+        if (!"DRAFT".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","BAD_STATUS")); return;
+        }
+        if (ver != doc.ver) {
+            emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                    + "\",\"status\":\"ERR\",\"code\":\"CONFLICT\",\"curVer\":" + doc.ver + "}");
+            return;
+        }
+
+        doc.status     = "IN_REVIEW";
+        doc.currentIdx = 0;
+        doc.ver++;
+        doc.updatedAt  = System.currentTimeMillis();
+
+        emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                + "\",\"status\":\"OK\",\"ver\":" + doc.ver
+                + ",\"statusAfter\":\"IN_REVIEW\",\"currentIdx\":0}");
+
+        // 첫 결재자에게 알림 PUSH
+        createNotification(doc.approvers[0], "DOC_SUBMITTED", doc.docId,
+                "문서 #" + doc.docId + " 결재 요청");
     }
 
     void handleDocApprove(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. docId, ver 파싱
-        // 2. 문서 조회, status == IN_REVIEW 체크, ver 체크
-        // 3. 권한: approvers[currentIdx] == empNo 아니면 FORBIDDEN
-        // 4. ver++ 갱신
-        // 5. 분기:
-        //    a) currentIdx + 1 < approvers.length
-        //       → currentIdx++ 유지(IN_REVIEW), 다음 결재자에게 DOC_NEXT_APPROVER PUSH
-        //    b) 마지막 결재자
-        //       → status = "APPROVED", 작성자에게 DOC_APPROVED PUSH
-        // 6. 승인자에게 OK RESP emit
+        int docId = JsonParser.getInt(json, "docId");
+        int ver   = JsonParser.getInt(json, "ver");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!"IN_REVIEW".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","BAD_STATUS")); return;
+        }
+        if (!doc.approvers[doc.currentIdx].equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+        if (ver != doc.ver) {
+            emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                    + "\",\"status\":\"ERR\",\"code\":\"CONFLICT\",\"curVer\":" + doc.ver + "}");
+            return;
+        }
+
+        doc.ver++;
+        doc.updatedAt = System.currentTimeMillis();
+
+        if (doc.currentIdx + 1 < doc.approvers.length) {
+            // 다음 결재자 존재 → 인덱스 증가
+            doc.currentIdx++;
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK","ver",doc.ver));
+            createNotification(doc.approvers[doc.currentIdx], "DOC_NEXT_APPROVER", doc.docId,
+                    "문서 #" + doc.docId + " 결재 요청");
+        } else {
+            // 최종 승인
+            doc.status = "APPROVED";
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK","ver",doc.ver));
+            createNotification(doc.authorEmpNo, "DOC_APPROVED", doc.docId,
+                    "문서 #" + doc.docId + " 최종 승인");
+        }
     }
 
     void handleDocReject(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // handleDocApprove와 유사하지만 status = "REJECTED"
-        // 작성자에게 DOC_REJECTED PUSH
+        int docId = JsonParser.getInt(json, "docId");
+        int ver   = JsonParser.getInt(json, "ver");
+        Document doc = documents.get(docId);
+
+        if (doc == null || "DELETED".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!"IN_REVIEW".equals(doc.status)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","BAD_STATUS")); return;
+        }
+        if (!doc.approvers[doc.currentIdx].equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+        if (ver != doc.ver) {
+            emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                    + "\",\"status\":\"ERR\",\"code\":\"CONFLICT\",\"curVer\":" + doc.ver + "}");
+            return;
+        }
+
+        doc.status = "REJECTED";
+        doc.ver++;
+        doc.updatedAt = System.currentTimeMillis();
+
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK","ver",doc.ver));
+        createNotification(doc.authorEmpNo, "DOC_REJECTED", doc.docId,
+                "문서 #" + doc.docId + " 반려");
     }
 
     void handleNotiList(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. limit(기본 20), onlyUnread(기본 false) 파싱
-        // 2. notifications.values() 중 noti.empNo == empNo 필터
-        // 3. onlyUnread == true면 !noti.read 추가 필터
-        // 4. createdAt 내림차순 정렬
-        // 5. limit 개수만큼 잘라서 JSON 배열로 직렬화 emit
+        int limit       = JsonParser.getInt(json, "limit");
+        boolean onlyUnread = JsonParser.getBool(json, "onlyUnread");
+        if (limit <= 0) limit = 20;
+
+        // 내 알림 필터링
+        List<Notification> myNotis = new ArrayList<>();
+        for (Notification n : notifications.values()) {
+            if (n.empNo.equals(empNo)) {
+                if (!onlyUnread || !n.read) {
+                    myNotis.add(n);
+                }
+            }
+        }
+
+        // createdAt 내림차순 정렬
+        myNotis.sort((a, b) -> Long.compare(b.createdAt, a.createdAt));
+
+        // limit 적용 후 JSON 배열 직렬화
+        StringBuilder arr = new StringBuilder("[");
+        int count = Math.min(limit, myNotis.size());
+        for (int i = 0; i < count; i++) {
+            if (i > 0) arr.append(",");
+            arr.append(notiToJson(myNotis.get(i)));
+        }
+        arr.append("]");
+
+        emit(sessionId, "{\"type\":\"RESP\",\"requestId\":\"" + requestId
+                + "\",\"status\":\"OK\",\"notifications\":" + arr + "}");
     }
 
     void handleNotiRead(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. notiId 파싱
-        // 2. 알림 조회 → 없으면 NOT_FOUND
-        // 3. noti.empNo != empNo → FORBIDDEN
-        // 4. noti.read = true
-        // 5. OK 응답
+        long notiId = JsonParser.getInt(json, "notiId");
+        Notification noti = notifications.get(notiId);
+
+        if (noti == null) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!noti.empNo.equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+
+        noti.read = true;
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK"));
     }
 
     void handleNotiDelete(String sessionId, String json, String requestId, String empNo) {
-        // 여기에 코드를 작성하세요.
-        // 1. notiId 파싱
-        // 2. 알림 조회 → 없으면 NOT_FOUND
-        // 3. noti.empNo != empNo → FORBIDDEN
-        // 4. notifications에서 제거
-        // 5. OK 응답
+        long notiId = JsonParser.getInt(json, "notiId");
+        Notification noti = notifications.get(notiId);
+
+        if (noti == null) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","NOT_FOUND")); return;
+        }
+        if (!noti.empNo.equals(empNo)) {
+            emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","ERR","code","FORBIDDEN")); return;
+        }
+
+        notifications.remove(notiId);
+        emit(sessionId, JsonParser.build("type","RESP","requestId",requestId,"status","OK"));
     }
 
     // =========================================================
     // 헬퍼 메서드
-    // ※ 채점을 위해 아래 메서드 시그니처를 수정하지 마세요.
     // =========================================================
 
     /**
@@ -316,12 +501,16 @@ public class WebSocketServer {
      * }}
      */
     Notification createNotification(String targetEmpNo, String type, int refDocId, String message) {
-        // 여기에 코드를 작성하세요.
-        // 1. Notification 객체 생성 (nextNotiId++ 사용)
-        // 2. notifications에 저장
-        // 3. PUSH JSON 만들어서 emitToEmployee(targetEmpNo, ...) 호출
-        // 4. 생성된 Notification 반환
-        return null;
+        Notification noti = new Notification(
+                nextNotiId++, targetEmpNo, type, refDocId, message, System.currentTimeMillis()
+        );
+        notifications.put(noti.notiId, noti);
+
+        String pushJson = "{\"type\":\"PUSH\",\"event\":\"NOTI_CREATED\",\"noti\":"
+                + notiToJson(noti) + "}";
+        emitToEmployee(targetEmpNo, pushJson);
+
+        return noti;
     }
 
     /**
@@ -332,24 +521,45 @@ public class WebSocketServer {
      *       "approvers":["E2001","E2002"],"status":"DRAFT","currentIdx":-1,"ver":1}
      */
     String docToJson(Document doc) {
-        // 여기에 코드를 작성하세요.
-        // approvers 배열 → ["E2001","E2002"] 형태로 변환 후 전체 JSON 조립
-        return null;
+        // approvers 배열 → JSON 배열 문자열
+        StringBuilder approversJson = new StringBuilder("[");
+        for (int i = 0; i < doc.approvers.length; i++) {
+            if (i > 0) approversJson.append(",");
+            approversJson.append("\"").append(doc.approvers[i]).append("\"");
+        }
+        approversJson.append("]");
+
+        return "{\"docId\":" + doc.docId
+                + ",\"title\":\"" + doc.title + "\""
+                + ",\"content\":\"" + doc.content + "\""
+                + ",\"authorEmpNo\":\"" + doc.authorEmpNo + "\""
+                + ",\"approvers\":" + approversJson
+                + ",\"status\":\"" + doc.status + "\""
+                + ",\"currentIdx\":" + doc.currentIdx
+                + ",\"ver\":" + doc.ver
+                + "}";
     }
 
     /**
      * Notification을 JSON 문자열로 직렬화
      */
     String notiToJson(Notification noti) {
-        // 여기에 코드를 작성하세요.
-        return null;
+        return "{\"notiId\":" + noti.notiId
+                + ",\"empNo\":\"" + noti.empNo + "\""
+                + ",\"type\":\"" + noti.type + "\""
+                + ",\"refDocId\":" + noti.refDocId
+                + ",\"message\":\"" + noti.message + "\""
+                + ",\"read\":" + noti.read
+                + "}";
     }
 
     /**
      * 특정 empNo가 해당 문서의 결재자 목록에 포함되는지 확인
      */
     boolean isApprover(Document doc, String empNo) {
-        // 여기에 코드를 작성하세요.
+        for (String a : doc.approvers) {
+            if (a.equals(empNo)) return true;
+        }
         return false;
     }
 }

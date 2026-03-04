@@ -80,36 +80,66 @@ public class Problem2 {
         StringTokenizer st;
         StringBuilder sb = new StringBuilder();
 
-        // 여기에 코드를 작성하세요.
         // 1. N, M 입력
-
+        st = new StringTokenizer(br.readLine());
+        N = Integer.parseInt(st.nextToken());
+        M = Integer.parseInt(st.nextToken());
 
         // 2. 로봇 시작 위치 입력
-
+        st = new StringTokenizer(br.readLine());
+        robotR = Integer.parseInt(st.nextToken());
+        robotC = Integer.parseInt(st.nextToken());
 
         // 3. 격자 초기 상태 입력
-
+        grid = new int[N][M];
+        for (int i = 0; i < N; i++) {
+            st = new StringTokenizer(br.readLine());
+            for (int j = 0; j < M; j++) {
+                grid[i][j] = Integer.parseInt(st.nextToken());
+            }
+        }
 
         // 4. 명령어 처리
         int K = Integer.parseInt(br.readLine().trim());
         for (int i = 0; i < K; i++) {
             String cmd = br.readLine().trim();
-            // TODO: 명령어에 따라 move() 호출
-
+            switch (cmd) {
+                case "U": move(0); break;
+                case "D": move(1); break;
+                case "L": move(2); break;
+                case "R": move(3); break;
+            }
         }
 
         // 5. 출력
-        // TODO: 총 수집 박스 수, 최종 위치, 격자 상태 출력
+        sb.append(collected).append("\n");
+        sb.append(robotR).append(" ").append(robotC).append("\n");
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < M; j++) {
+                if (j > 0) sb.append(" ");
+                sb.append(grid[i][j]);
+            }
+            sb.append("\n");
+        }
 
         System.out.print(sb);
     }
 
     // ※ 채점을 위해 아래 메서드 시그니처를 수정하지 마세요.
     static void move(int dirIndex) {
-        // 여기에 코드를 작성하세요.
         // 1. 다음 위치 계산
-        // 2. 범위 벗어나면 return
+        int nr = robotR + dr[dirIndex];
+        int nc = robotC + dc[dirIndex];
+
+        // 2. 범위 벗어나면 이동 안 함
+        if (nr < 0 || nr >= N || nc < 0 || nc >= M) return;
+
         // 3. 이동
+        robotR = nr;
+        robotC = nc;
+
         // 4. 박스 수집
+        collected += grid[robotR][robotC];
+        grid[robotR][robotC] = 0;
     }
 }
